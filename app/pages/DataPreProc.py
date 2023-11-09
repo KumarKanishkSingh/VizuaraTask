@@ -14,11 +14,11 @@ st.subheader("Data Preprocessing")
 
 # print("Loading the Data...")
 
-# st.write("Loading the Data...")
-
+st.write("Loading the Data...")
+mnist = fetch_openml('mnist_784', as_frame=False, cache=False)
 # Load the dataset from the binary file
-with open('mnist_data.pkl', 'rb') as file:
-    mnist = pickle.load(file)
+# with open('mnist_data.pkl', 'rb') as file:
+#     mnist = pickle.load(file)
 
 st.write("Data Loaded")
 
