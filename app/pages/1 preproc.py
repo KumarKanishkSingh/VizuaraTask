@@ -55,8 +55,13 @@ split_ratio = st.slider('Test Size', min_value=0.01, max_value=0.99, step=0.01)
 
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=1-split_ratio, random_state=42)
 
-st.write('Training set shape:',X_train.shape, y_train.shape)
-st.write('Training set shape:',X_test.shape, y_test.shape)
+XCnn = X.reshape(-1, 1, 28, 28)
+# st.text("Shape of Training Data: ", XCnn.shape)
+XCnn_train, XCnn_test, y_train, y_test = train_test_split(XCnn, y, test_size=0.25, random_state=42)
+# XCnn_train.shape, y_train.shape
+
+st.write('Training set shape:',XCnn_train.shape, y_train.shape)
+st.write('Training set shape:',XCnn_test.shape, y_test.shape)
 
 def plot_example(X, y):
     """Plot the first 100 images in a 10x10 grid."""
@@ -77,16 +82,73 @@ def plot_example(X, y):
     st.set_option('deprecation.showPyplotGlobalUse', False)
     st.pyplot()
 
-
 if st.button('Show Training Data'): 
     plot_example(X_train, y_train)
 
 st.subheader("Model Training")
 
-num_layers = st.number_input('Enter the number of layers:', step=1)
+# num_layers = st.number_input('Enter the number of layers:', step=1)
 
-    # Get the number of neurons in each layer from the user
-num_neurons = [st.number_input(f'Number of neurons in Layer {i+1}', step=1) for i in range(num_layers)]
+#     # Get the number of neurons in each layer from the user
+# num_neurons = [st.number_input(f'Number of neurons in Layer {i+1}', step=1) for i in range(num_layers)]
+
+# User input for number of layers
+num_layers = st.slider("Number of Layers", min_value=1, max_value=10, value=3, key='num_layers')
+
+# Collect information for each layer
+layers_info = []
+j=0
+for i in range(num_layers):
+    st.header(f"Layer {i + 1}")
+    layer_type = st.selectbox(f"Layer Type {i + 1}", ["conv", "fc"], key=f'layer_type_{i}')
+    if layer_type=="conv":
+
+        if i==0:
+            in_channels = st.number_input(f"Input Channels {i + 1}", min_value=1, value=1, key=f'in_channels_{i}')
+            in_features = 28
+        else :
+            in_channels = layers_info[i-1]['out_channels']
+            in_features=layers_info[i-1]['out_features']
+        out_channels = st.number_input(f"Output Channels {i + 1}", min_value=1, value=32, key=f'out_channels_{i}')
+        kernel_size = st.number_input(f"Kernel Size {i + 1}", min_value=1, value=3, key=f'kernel_size_{i}')
+        # in_features=layers_info[i-1]['out_features']
+        
+
+        # st.number_input(f"Input Features {i + 1}", min_value=1, value=1600, key=f'in_features_{i}')
+        out_features = ((in_features-kernel_size)+1)//2
+        # st.number_input(f"Output Features {i + 1}", min_value=1, value=100, key=f'out_features_{i}')
+    if layer_type=="fc":
+        in_channels = 1
+        out_channels = 1
+        kernel_size = 1
+        if j==0:
+            if i==0:
+                in_features=28*28*1
+            else:
+                in_features=(layers_info[i-1]['out_features']**2)*layers_info[i-1]['out_channels']
+        else:
+            in_features = (layers_info[i-1]['out_features'])
+
+        # st.number_input(f"Input Features {i + 1}", min_value=1, value=1600, key=f'in_features_{i}')
+        out_features = st.number_input(f"Nodes {i + 1}", min_value=1, value=100, key=f'out_features_{i}')
+        j=j+1
+
+    layer_info = {
+        'type': layer_type,
+        'in_channels': in_channels,
+        'out_channels': out_channels,
+        'kernel_size': kernel_size,
+        'in_features': in_features,
+        'out_features': out_features
+    }
+    st.write(in_features)
+
+    layers_info.append(layer_info)
+    
+
+# User input for dropout
+dropout = st.slider("Dropout", min_value=0.0, max_value=1.0, value=0.5, key='dropout')
+
 
 import torch
 from torch import nn
@@ -94,9 +156,56 @@ import torch.nn.functional as F
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-mnist_dim = X.shape[1]
-hidden_dim = int(mnist_dim/8)
-output_dim = len(np.unique(mnist.target))
+# mnist_dim = X.shape[1]
+# hidden_dim = int(mnist_dim/8)
+# output_dim = len(np.unique(mnist.target))
+
+class Cnn(nn.Module):
+    def __init__(self, layers_info, dropout=0.5):
+        super(Cnn, self).__init__()
+
+        self.conv_layers = nn.ModuleList()
+        self.fc_layers = nn.ModuleList()
+
+        for i, layer_info in enumerate(layers_info):
+            if layer_info['type'] == 'conv':
+                in_channels = layers_info[i]['in_channels']
+                # layer_info.get('in_channels') if i == 0 else layers_info[i - 1]['out_channels']
+                layer = nn.Conv2d(int(in_channels), int(layer_info['out_channels']), kernel_size=int(layer_info['kernel_size']))
+                self.conv_layers.append(layer)
+            elif layer_info['type'] == 'fc':
+                in_features = layer_info.get('in_features') 
+                # if i == 0 else layers_info[i - 1]['out_features']
+                layer = nn.Linear(int(in_features), int(layer_info['out_features']))
+                self.fc_layers.append(layer)
+            else:
+                raise ValueError("Invalid layer type. Supported types: 'conv' or 'fc'.")
+
+            # self.layers.append(layer)
+        
+        self.conv2_drop = nn.Dropout2d(p=dropout)
+        
+        self.fc_last = nn.Linear(int(layers_info[-1]['out_features']), 10)
+
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x):
+        for layer in self.conv_layers:
+            x = torch.relu(F.max_pool2d(layer(x), 2))
+            # st.write(x.shape)
+        # x = torch.relu(F.max_pool2d(self.conv2_drop(x), 2))
+        # st.write(x.shape)
+        x = x.view(-1, x.size(1) * x.size(2) * x.size(3))
+        # st.write(x.shape)
+        for layer in self.fc_layers:
+            x = torch.relu(layer(x))
+            # st.write(x.shape)
+        # flatten over channel, height, and width
+        # x = x.view(-1, x.size(1) * x.size(2) * x.size(3))
+
+        x = torch.relu(self.dropout(x))
+        x = torch.softmax(self.fc_last(x), dim=-1)
+        return x
 
 # class ClassifierModule(nn.Module):
 #     def __init__(
@@ -118,82 +227,57 @@ output_dim = len(np.unique(mnist.target))
 #         X = F.softmax(self.output(X), dim=-1)
 #         return X
     
-class DynamicClassifierModule(nn.Module):
-    def __init__(self, input_dim, num_layers, num_neurons, output_dim, dropout=0.5):
-        super(DynamicClassifierModule, self).__init__()
-        self.dropout = nn.Dropout(dropout)
+# class DynamicClassifierModule(nn.Module):
+#     def __init__(self, input_dim, num_layers, num_neurons, output_dim, dropout=0.5):
+#         super(DynamicClassifierModule, self).__init__()
+#         self.dropout = nn.Dropout(dropout)
 
-        # Create layers dynamically based on user input
-        layers = [nn.Linear(input_dim, num_neurons[0])]
-        layers.append(nn.ReLU())
-        layers.append(self.dropout)
+#         # Create layers dynamically based on user input
+#         layers = [nn.Linear(input_dim, num_neurons[0])]
+#         layers.append(nn.ReLU())
+#         layers.append(self.dropout)
 
-        for i in range(num_layers - 1):
-            layers.append(nn.Linear(num_neurons[i], num_neurons[i + 1]))
-            layers.append(nn.ReLU())
-            layers.append(self.dropout)
+#         for i in range(num_layers - 1):
+#             layers.append(nn.Linear(num_neurons[i], num_neurons[i + 1]))
+#             layers.append(nn.ReLU())
+#             layers.append(self.dropout)
 
-        layers.pop()  # Remove the last ReLU and dropout
-        self.hidden = nn.Sequential(*layers)
-        self.output = nn.Linear(num_neurons[-1], output_dim)
+#         layers.pop()  # Remove the last ReLU and dropout
+#         self.hidden = nn.Sequential(*layers)
+#         self.output = nn.Linear(num_neurons[-1], output_dim)
 
-    def forward(self, X, **kwargs):
-        X = self.hidden(X)
-        X = self.dropout(X)
-        X = F.softmax(self.output(X), dim=-1)
-        return X
+#     def forward(self, X, **kwargs):
+#         X = self.hidden(X)
+#         X = self.dropout(X)
+#         X = F.softmax(self.output(X), dim=-1)
+#         return X
 
 
 from skorch import NeuralNetClassifier
-
 torch.manual_seed(0)
 
 
 
-# net = NeuralNetClassifier(
-#     DynamicClassifierModule,
-#     max_epochs=1,
-#     lr=0.1,
-#     device=device,
-# )
-
-# net.fit(X_train, y_train);
-
-# def train_model(net, X_train, y_train, progress_bar):
-#     max_epochs=net.max_epochs
-#     for epoch in range(1, max_epochs + 1):
-#         net.partial_fit(X_train, y_train)
-#         progress_bar.progress(epoch / max_epochs)
-#         time.sleep(0.1)
-
-# if st.button('Fit Model'):
-#     my_bar = st.progress(0)
-#     # max_epochs = 20
-
-#     with st.spinner('Training model...'):
-#         train_model(net, X_train, y_train, my_bar)
-
-#     st.success('Training complete!')
+# # net = NeuralNetClassifier(
+# #     DynamicClassifierModule,
+# #     max_epochs=1,
+# #     lr=0.1,
+# #     device=device,
+# # )
 
 max_epochs = st.number_input('Enter the number of epochs', step=1)
 lr = st.number_input('Enter the learning rate')
 
-dynamic_model = NeuralNetClassifier(DynamicClassifierModule(mnist_dim,num_layers,num_neurons,output_dim),
-                                        max_epochs=1,
-                                        lr=lr,
-                                        device=device,
-                                        )
+# model = Cnn(layers_info, dropout)
 
- # Train the model for a fixed number of epochs (e.g., 5)
-# if st.button('Train Model'):
-#     progress_bar = st.progress(0)
-#     for epoch in range(max_epochs):
-#         # progress_text.empty()
-#         # You might want to update the training data based on your specific use case
-#         dynamic_model.fit(X_train, y_train)
+# Instantiate your model
+cnn_model = Cnn(layers_info, dropout)
 
-#         progress_bar.progress((epoch + 1) / max_epochs)  # Update the progress bar
-#     st.success('Model training completed!')
+# Instantiate NeuralNetClassifier with your model
+dynamic_model = NeuralNetClassifier(module=cnn_model,
+                                    max_epochs=1,
+                                    lr=lr,
+                                    device=device)
 
 from sklearn.metrics import accuracy_score
 
@@ -212,16 +296,17 @@ if st.button('Train Model'):
     for epoch in range(max_epochs):
         # param_text.empty()
         # You might want to update the training data based on your specific use case
-        dynamic_model.fit(X_train, y_train)  # <-- Add this line to fit the model
+        dynamic_model.fit(XCnn_train, y_train)  # <-- Add this line to fit the model
         
         # Get training and validation metrics
         train_loss = dynamic_model.history[-1, 'train_loss']
+        # train_loss = dynamic_model.history[-1, 'train_acc']
         valid_acc = dynamic_model.history[-1, 'valid_acc']
         valid_loss = dynamic_model.history[-1, 'valid_loss']
         dur = dynamic_model.history[-1, 'dur']
 
         # Print the metrics
-        st.text(f"{epoch + 1:6d}   {train_loss:.4f}         {valid_acc:.4f}        {valid_loss:.4f}         {dur:.4f}")
+        st.text(f"{epoch + 1:6d}   {train_loss:.4f}        {valid_acc:.4f}        {valid_loss:.4f}         {dur:.4f}")
 
         # Append training and validation loss for plotting
         train_losses.append(train_loss)
@@ -243,15 +328,19 @@ if st.button('Load Model'):
 # y_pred = dynamic_model.predict(X_test)
 
 
-y_pred = dynamic_model.predict(X_test)
+# y_pred = dynamic_model.predict(X_test)
 
-test_acc=accuracy_score(y_test, y_pred)
+# test_acc=accuracy_score(y_test, y_pred)
 
-st.write(f"Test Accuracy: {test_acc*100:.4f}%")
+# st.write(f"Test Accuracy: {test_acc*100:.4f}%")
 
-error_mask = y_pred != y_test
+# error_mask = y_pred != y_test
 
-plot_example(X_test[error_mask], y_pred[error_mask])
+# plot_example(X_test[error_mask], y_pred[error_mask])
+
+y_pred_cnn = dynamic_model.predict(XCnn_test)
+# accuracy_score(y_test, y_pred_cnn)
+st.write("Test Accuracy: ",accuracy_score(y_test, y_pred_cnn))
 
 
 
