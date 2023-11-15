@@ -8,7 +8,36 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import time
+from streamlit_drawable_canvas import st_canvas
+# import numpy as np
+from PIL import Image
+import io
+import base64
 
+
+def save_drawing(image_data):
+    # Convert the base64 image data to a NumPy array
+    image_array = decode_base64(image_data)
+
+    # Resize the image to (28, 28)
+    resized_image = resize_image(image_array, target_shape=(28, 28))
+
+    # Save the resized image
+    image = Image.fromarray(resized_image)
+    image.save("saved_drawing.png")
+    st.success("Drawing saved as saved_drawing.png")
+
+def decode_base64(base64_string):
+    image_data = base64_string.split(",")[1]
+    image_bytes = io.BytesIO(base64.b64decode(image_data))
+    image_array = np.array(Image.open(image_bytes))
+    return image_array
+
+def resize_image(image_array, target_shape):
+    # Resize the image using PIL
+    image = Image.fromarray(image_array)
+    resized_image = image.resize(target_shape[::-1], Image.ANTIALIAS)
+    return np.array(resized_image)
 
 st.title('Hand written text classification ')
 
@@ -281,7 +310,9 @@ dynamic_model = NeuralNetClassifier(module=cnn_model,
 
 from sklearn.metrics import accuracy_score
 
-if st.button('Train Model'):
+bt=st.slider('Train Model',0,1,0,1)
+
+if bt:
     progress_bar = st.progress(0)
 
     # Lists to store training and validation loss for plotting
@@ -306,7 +337,7 @@ if st.button('Train Model'):
         dur = dynamic_model.history[-1, 'dur']
 
         # Print the metrics
-        st.text(f"{epoch + 1:6d}   {train_loss:.4f}        {valid_acc:.4f}        {valid_loss:.4f}         {dur:.4f}")
+        st.text(f"{epoch + 1:6d}        {train_loss:.4f}        {valid_acc:.4f}        {valid_loss:.4f}         {dur:.4f}")
 
         # Append training and validation loss for plotting
         train_losses.append(train_loss)
@@ -316,32 +347,44 @@ if st.button('Train Model'):
         # Line chart for training and validation loss
     train_chart=st.line_chart({"Training Loss": train_losses, "Validation Loss": valid_losses})
     st.success('Model training completed!')
-    progress_text.empty()
+    y_pred_cnn=dynamic_model.predict(XCnn_test)
+    st.write(accuracy_score(y_test, y_pred_cnn))
+    # if st.button("Save Model"):
+    #     # Save the model
+    #     torch.save(dynamic_model.module_, 'saved_model.pth')
+    #     st.success("Model saved as saved_model.pth")
 
-if st.button('Save Model'):
-    torch.save(dynamic_model, 'saved_model.pth')
+    # # progress_text.empty()
+if st.slider("Predict the digit drawn",0,1,0,1):
+    # Load the image
+    image_path = "drawing.png"  # Change this to the path of your saved drawing
+    image = Image.open(image_path)
+    # st.image(image)
+    # Resize the image to (28, 28)
+    resized_image = image.resize((28, 28))
 
-if st.button('Load Model'):
-    dynamic_model = torch.load('saved_model.pth')
+    # Convert the image to a NumPy array
+    image_array = np.array(resized_image)
 
-# # Now you can make predictions after the model has been trained
-# y_pred = dynamic_model.predict(X_test)
+    # If the image is RGBA (4 channels), convert it to grayscale (1 channel)
+    if len(image_array.shape) == 3 and image_array.shape[2] == 4:
+        image_array = image_array[:, :, :3]
 
+    # Convert the image to grayscale if it's not already
+    if len(image_array.shape) == 3 and image_array.shape[2] == 3:
+        image_array = np.dot(image_array[..., :3], [0.2989, 0.5870, 0.1140])
 
-# y_pred = dynamic_model.predict(X_test)
+    # Normalize the pixel values to be in the range [0, 1]
+    image_array = image_array / 255.0
+    st.image(image_array)
 
-# test_acc=accuracy_score(y_test, y_pred)
-
-# st.write(f"Test Accuracy: {test_acc*100:.4f}%")
-
-# error_mask = y_pred != y_test
-
-# plot_example(X_test[error_mask], y_pred[error_mask])
-
-y_pred_cnn = dynamic_model.predict(XCnn_test)
-# accuracy_score(y_test, y_pred_cnn)
-st.write("Test Accuracy: ",accuracy_score(y_test, y_pred_cnn))
-
-
+    image_array = image_array.reshape(1, 1, 28, 28)
+    image_array = image_array.astype(XCnn_test.dtype)
+    # st.write(type(XCnn_test))
+    # st.write(type(image_array))
+    XCnn_test = np.vstack([XCnn_test, image_array])
+    # XCnn_test.shape
+    y_pred_cnn=dynamic_model.predict(XCnn_test)
+    st.write(y_pred_cnn[-1])
 
 
